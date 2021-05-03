@@ -1,0 +1,108 @@
+---
+title: "Demand_Estimations_modified"
+author: "Anton Aish"
+date: "02/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+setwd("~/Documents/2020/ENGSCI263/Project_2/ENGSCI263-OR-Project")# Will need to change to your directory
+library(tidyverse)
+library(stringr)
+library(leaflet)
+
+```
+
+
+```{r}
+demandData <- read.csv("Data/demandDataUpdatedOrig.csv") %>% as_tibble()
+
+# formatting date
+demandData.gather = gather(demandData, key = Date, value = Demand, starts_with('x'))
+demandData.gather$Date = str_sub(demandData.gather$Date,2,-1) %>% str_replace_all("\\.", "-") %>% as.Date("%d-%m-%y")
+
+# Adding weekday factor
+demandData.gather$dayOfTheWeek = as.factor(format(demandData.gather$Date, "%a"))
+
+# Adding store type factor
+demandData.gather$StoreType = as.character(demandData.gather$Name) %>% str_sub(1,1) %>% factor(levels = c("N","T"), labels = c("Noel Leeming", "The Warehouse"))
+
+```
+
+
+```{r}
+# plotting demand time series
+demandData.gather %>% group_by(Date,StoreType)%>% summarise(totDemand = mean(Demand,na.rm=TRUE)) %>% ggplot() + geom_line(aes(x = Date, y = totDemand, color = StoreType)) + scale_x_date(date_breaks = "1 day", date_labels = "%a") + labs(title = "Daily Pallet Demand for The Warehouse Group", subtitle = "Monday 3rd Feburary to Sunday 1st March 2020", y  = "Pallets", x = 'Day') + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+From the plot above it appears that the average daily pallet demand for The Warehouse stores is higher than the Noel Leeming stores. We can also see during the weekdays daily pallet demand seems to relatively constant for each store type. The average daily pallet demand for The Warehouse stores during the weekdays is around 7 pallets whereas for Noel Leeming stores it is around 5 pallets. The Noel Leeming stores do not appear to have any demand for pallets in the weekend. The Warehouse stores only have pallet demand on Saturday but not Sunday. To investigate the demands on different weekdays we will now create a grouped boxplot.
+
+
+```{r}
+# Distribution of demand for weekdays
+demandData.gather %>% group_by(dayOfTheWeek,StoreType) %>% mutate(dayOfTheWeek =  fct_relevel(dayOfTheWeek,"Mon","Tue","Wed","Thu","Fri","Sat","Sun")) %>% ggplot() + geom_boxplot(aes(y=Demand, x = dayOfTheWeek, fill = StoreType))
+
+```
+
+From the boxplot above it would appears an appropriate estimate for daily pallet demand can be made by spliting demand into 3 groups. The groups are as follows; The Warehouse stores during the weekdays, Noel Leeming stores during the weekdays, The Warehouse stores on Saturday. With the daily pallet demand for Noel Leeming stores in the weekend being 0 and the daily pallet demand for The Warehouse on Sunday also being 0. But to group the stores together in this way assumes that the daily pallet demand for The Warehouse Group stores does no vary too much between The Warehouse stores and the Noel Leeming stores. We will now investigate this assumption.
+
+```{r}
+# investigating weekday demand for the stores
+demandData.gather %>%  filter(dayOfTheWeek != "Sat") %>% filter(dayOfTheWeek != "Sun") %>% ggplot() + geom_boxplot(aes(y = Demand, x = Name, fill = StoreType)) + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#demandData.gather %>%  filter(dayOfTheWeek == "Sat") %>% filter(StoreType == "The Warehouse") %>% ggplot() + geom_boxplot(aes(y = Demand, x = Name, fill = StoreType)) + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+stores <- read.csv("Data/WarehouseLocations.csv")
+stores.filtered = filter(stores, stores$Type != "Distribution") 
+
+
+mean_demand = demandData.gather %>%  filter(dayOfTheWeek != "Sat") %>% filter(dayOfTheWeek != "Sun") %>% group_by(Name) %>% summarise(meanDemand = mean(Demand,na.rm=TRUE))
+mean_demand = arrange(mean_demand,match(mean_demand$Name,stores$Store))
+stores.filtered$meanDemand = mean_demand$meanDemand
+
+theWarehouses = filter(stores.filtered, stores.filtered$Type == "The Warehouse")
+noelLeeming = filter(stores.filtered,stores.filtered$Type == "Noel Leeming")
+colorTWH = colorNumeric(colorRamp(c("green","blue")),theWarehouses$meanDemand)
+colorNL = colorNumeric(colorRamp(c("green","blue")),noelLeeming$meanDemand)
+
+leaflet(theWarehouses) %>% addTiles() %>% addCircleMarkers(lat = theWarehouses$Lat, lng = theWarehouses$Long, color = colorTWH(theWarehouses$meanDemand)) %>% addLegend("bottomright", pal = colorTWH, values = ~theWarehouses$meanDemand, title = "Mean Demand")
+
+leaflet(noelLeeming) %>% addTiles() %>% addCircleMarkers(lat = noelLeeming$Lat, lng = noelLeeming$Long, color = colorNL(noelLeeming$meanDemand)) %>% addLegend("bottomright", pal = colorNL, values = ~noelLeeming$meanDemand, title = "Mean Demand")
+
+
+```
+
+
+```{r}
+# Calculating Quartiles for weekday
+quantiles = demandData.gather %>%  filter(dayOfTheWeek != "Sat") %>% filter(dayOfTheWeek != "Sun") %>% group_by(Name) %>% summarise(quants = quantile(Demand,probs = c(0.75)))
+
+ggplot(quantiles) + geom_point(aes(x = Name, y = quants)) + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
+```{r}
+# # Weekday demand
+# demandData.gather %>% filter(dayOfTheWeek != "Sat") %>% filter(dayOfTheWeek != "Sun") %>% group_by(StoreType) %>% ggplot() + geom_boxplot(aes(y=Demand, fill = StoreType))
+# 
+# demandData.gather %>% filter(dayOfTheWeek != "Sat") %>%  filter(dayOfTheWeek != "Sun") %>% group_by(StoreType) %>% ggplot() + geom_violin(aes(y=Demand,x = StoreType, fill = StoreType))
+
+```
+
+From the box and violin plot above it appears that a suitable estimate for the daily pallet demand for Noel Leeming stores is 6 pallets per weekday. Similarly a suitable estimate for the daily pallet demand for The Warehouse stores is 8 pallets per day. These estimates around the 75th percentile (as seen from the boxplot) will ensure that most days the trucks will be able to transport enough pallets to satisfy demand of the stores.
+
+```{r}
+# # The Warehouse Saturday demand
+# demandData.gather %>% filter(dayOfTheWeek == "Sat" & StoreType == "The Warehouse") %>% group_by(StoreType) %>% ggplot() + geom_boxplot(aes(y=Demand, fill = StoreType))
+# 
+# demandData.gather %>% filter(dayOfTheWeek == "Sat" & StoreType == "The Warehouse") %>% group_by(StoreType) %>% ggplot() + geom_violin(aes(y=Demand,x = "TheWarehouse", fill = StoreType))
+
+```
+
+From the plots above an appropriate estimate for the daily pallet demand for The Warehouse stores on Saturday is 3 pallets per store. Once again by estimating daily demand to be above the mean demand this should ensure that most of the time the trucks can carry enough pallets to meet store demand.
